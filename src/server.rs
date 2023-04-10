@@ -11,31 +11,25 @@ pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
 
- #[derive(Debug, Default)]
+ #[derive(Debug, Default,Clone)]
  pub struct SecureClipboard {
      RoomToClipboardIdMap : Arc<Mutex<RefCell<HashMap<String,String>>>>
  }
 
  #[tonic::async_trait]
  impl SharedClipboard for SecureClipboard{
-
-     fn new(&self)->Self
-     {
-         Ok(self);
-     }
-
      async fn join_shared_room(&self, request: Request<RoomId>) -> Result<Response<ClipboardId>, Status> {
          let roomId = request.into_inner();
-         let mut clipboardId: String::new();
+         let mut clipboardId = String::new();
          if self.RoomToClipboardIdMap.lock().unwrap().borrow().contains_key(&roomId.room) {
-             let map = self.RoomToClipboardIdMap.lock().unwrap().into_inner();
-             clipboardId = map.get(&roomId.room).unwrap().clone().as_str();
+             let map = self.RoomToClipboardIdMap.lock().unwrap().clone().into_inner();
+             clipboardId = map.get(&roomId.room).unwrap().clone();
          } else {
              let clonedMap = self.RoomToClipboardIdMap.lock().unwrap();
              let mut clonedMap = clonedMap.borrow_mut();
              clonedMap.insert(roomId.clone().room, "".to_string());
          }
-
+        print!("Room: {}, ClipboardId {}", &roomId.room, clipboardId);
          let response = ClipboardId {
 
              room_id : Option::Some(roomId),
