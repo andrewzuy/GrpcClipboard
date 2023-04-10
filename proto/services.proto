@@ -1,0 +1,22 @@
+syntax = "proto3";
+package clipboard_package;
+
+service SharedClipboard{
+  rpc JoinSharedRoom(RoomId) returns (ClipboardId){};
+  rpc GetClipboard(ClipboardId) returns (Clipboard){};
+  rpc SetClipboard(Clipboard) returns (ClipboardId){};
+}
+
+message RoomId{
+  string room = 1;
+}
+
+message ClipboardId{
+  RoomId roomId = 1;
+  string clipboardId = 2;
+}
+
+message Clipboard{
+  ClipboardId clipboardId = 1;
+  string data = 2;
+}
