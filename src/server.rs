@@ -29,7 +29,7 @@ pub mod clipboard_package{
              let mut clonedMap = clonedMap.borrow_mut();
              clonedMap.insert(roomId.clone().room, "".to_string());
          }
-        print!("Room: {}, ClipboardId {}", &roomId.room, clipboardId);
+        println!("Room: {}, ClipboardId {}", &roomId.room, clipboardId);
          let response = ClipboardId {
 
              room_id : Option::Some(roomId),
