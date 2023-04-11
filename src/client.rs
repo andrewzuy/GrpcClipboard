@@ -5,6 +5,7 @@ use crate::clipboard_package::shared_clipboard_client::SharedClipboardClient;
 use crate::clipboard_package::{Clipboard, RoomId};
 use crate::clipboard_package::ClipboardId;
 use std::sync::{Arc, Mutex};
+use md5::Digest;
 
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
@@ -18,9 +19,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         room: "Dojo".into(),
     });
 
-    let response = client.join_shared_room(request);
+    let response = client.join_shared_room(request).await?.into_inner();
 
-    println!("RESPONSE={:?}", response.await?.into_inner().room_id.unwrap().room);
+    println!("Roomd={}, ClipboardId={:x}", response.room_id.unwrap().room, md5::compute(response.clipboard_id) ) ;
 
     Ok(())
 
