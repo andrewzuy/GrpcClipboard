@@ -1,5 +1,4 @@
-use std::borrow::Borrow;
-use std::cell::{RefCell, RefMut};
+use std::cell::{RefCell};
 use std::collections::HashMap;
 use clearscreen;
 use tonic::{transport::Server, Request, Response, Status};
@@ -8,7 +7,6 @@ use crate::clipboard_package::shared_clipboard_server::SharedClipboard;
 use crate::clipboard_package::{Clipboard, RoomId};
 use crate::clipboard_package::ClipboardId;
 use std::sync::{Arc, Mutex};
-use md5::Digest;
 
 static debug: bool = true;
 
@@ -75,10 +73,16 @@ pub mod clipboard_package{
 
      async fn set_clipboard(&self, request: Request<Clipboard>) -> Result<Response<ClipboardId>, Status> {
         let clipboard = request.into_inner();
-        let room = clipboard.clipboard_id.unwrap().room_id.unwrap().room;
+        let room = clipboard.clipboard_id.unwrap().room_id.unwrap().room.clone();
+        let room_clone = room.clone();
         let clip_data = clipboard.data.clone();
-        
-         todo!()
+        let hash = md5::compute(clipboard.data);
+        self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().insert(room, clip_data);
+        let response = ClipboardId{
+            room_id : Some(RoomId { room: room_clone}),
+            clipboard_id : format!("{:X}", hash )
+        };
+         Ok(Response::new(response))
      }
  }
 
