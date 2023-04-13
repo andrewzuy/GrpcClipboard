@@ -1,18 +1,27 @@
-use std::cell::{RefCell, RefMut};
-use std::collections::HashMap;
-use tonic::{transport::Server, Request, Response, Status};
 use crate::clipboard_package::shared_clipboard_client::SharedClipboardClient;
 use crate::clipboard_package::{Clipboard, RoomId};
 use crate::clipboard_package::ClipboardId;
-use std::sync::{Arc, Mutex};
-use md5::Digest;
-
+use serde::{Deserialize};
+use std::{fs, path};
+use aes;
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
 
+#[derive(Debug,Deserialize)]
+struct Config{
+    Host:String,
+    Room:String,
+    Passkey:String
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = fs::read_to_string("config.json")
+        .expect("Should have been able to read the file");
+    let conf:Config =  serde_json::from_str(&config).unwrap();
+    println!("Host={}, Room={}, Passkey={}",conf.Host.clone(), conf.Room.clone(), conf.Passkey.clone());
+
     let mut client = SharedClipboardClient::connect("http://[::1]:8080").await?;
     let room = String::from("Dojo");
     let request = tonic::Request::new(RoomId {
@@ -49,5 +58,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Room={}, ClipboardId={}, ClipboardData={}", room, format!("{:X}", hash ), data);
     println!("Returned from server ID={}", response.await?.into_inner().clipboard_id);
     Ok(())
-
 }

@@ -17,10 +17,15 @@ name = "client"
 path = "src/client.rs"
 
 [dependencies]
+aes = "0.8.2"
 clearscreen = "2.0.1"
+config-file = "0.2.3"
+json = "0.12.4"
 md5 = "0.7.0"
 prost = "0.11.8"
 protoc = "2.28.0"
+serde = { version = "1.0.96", features = ["derive"] }
+serde_json = "1.0.96"
 tokio = {version = "1.27.0", features = ["rt-multi-thread"]}
 tonic = "0.9.1"
 
