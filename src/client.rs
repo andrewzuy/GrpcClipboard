@@ -1,9 +1,13 @@
 use crate::clipboard_package::shared_clipboard_client::SharedClipboardClient;
 use crate::clipboard_package::{Clipboard, RoomId};
 use crate::clipboard_package::ClipboardId;
+use aes::cipher::{KeyInit, BlockEncrypt};
 use serde::{Deserialize};
 use std::{fs, path};
-use aes;
+use std::io::{self, Write};
+use aes::Aes256;
+use aes::cipher::{BlockCipher, BlockDecrypt,generic_array::GenericArray};
+use rand::{rngs::OsRng, RngCore};
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
@@ -15,6 +19,80 @@ struct Config{
     Passkey:String
 }
 
+fn encrypt_aes_256_cbc(plaintext: &[u8], key: &[u8; 32]) -> Vec<u8> {
+    let mut iv = [0u8; 16];
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut iv);
+    let cipher = Aes256::new(GenericArray::from_slice(key));
+    let mut ciphertext = iv.to_vec();
+    let mut prev_block = iv;
+    for block in plaintext.chunks(16) {
+        let mut plaintext_block = [0u8; 16];
+        plaintext_block[..block.len()].copy_from_slice(block);
+        for i in 0..16 {
+            plaintext_block[i] ^= prev_block[i];
+        }
+        let mut ciphertext_block = plaintext_block.clone();
+        cipher.encrypt_block(GenericArray::from_mut_slice(&mut ciphertext_block));
+        prev_block = ciphertext_block;
+        ciphertext.extend_from_slice(&ciphertext_block);
+    }
+    ciphertext
+}
+
+fn decrypt_aes_256_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+    // Verify that the ciphertext is at least one block in length (IV + ciphertext)
+    if ciphertext.len() < 16 {
+        return None;
+    }
+    
+    // Extract the initialization vector (IV) from the first block of the ciphertext
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&ciphertext[..16]);
+    
+    // Create an AES-256 cipher with the given key
+    let cipher = Aes256::new(GenericArray::from_slice(key));
+    
+    // Create a buffer to hold the decrypted plaintext
+    let mut plaintext = vec![0u8; ciphertext.len() - 16];
+    
+    // Decrypt the ciphertext in CBC mode
+    let mut prev_block = iv;
+    for (i, block) in ciphertext[16..].chunks(16).enumerate() {
+        if block.len() < 16 {
+            // Pad the last block if it is less than 16 bytes
+            let mut padded_block = [0u8; 16];
+            padded_block[..block.len()].copy_from_slice(block);
+            for j in block.len()..16 {
+                padded_block[j] = 16 - (block.len() as u8);
+            }
+            block_cipher_decrypt(&mut plaintext[i * 16..], &cipher, &prev_block, &padded_block);
+        } else {
+            let mut decrypted_block = [0u8; 16];
+            block_cipher_decrypt(&mut decrypted_block, &cipher, &prev_block, block);
+            prev_block.copy_from_slice(&block[..16]);
+            plaintext[i * 16..(i + 1) * 16].copy_from_slice(&decrypted_block);
+        }
+    }
+    
+    // Remove PKCS#7 padding from the plaintext
+    let padding = plaintext[plaintext.len() - 1] as usize;
+    let unpadded_length = plaintext.len() - padding;
+    plaintext.truncate(unpadded_length);
+    
+    Some(plaintext)
+}
+
+fn block_cipher_decrypt(output: &mut [u8], cipher: &Aes256, prev_block: &[u8], input: &[u8]) {
+    let mut input_block = [0u8; 16];
+    input_block.copy_from_slice(input);
+    let mut output_block = input_block.clone();
+    cipher.decrypt_block(GenericArray::from_mut_slice(&mut output_block));
+    for i in 0..16 {
+        output[i] = output_block[i] ^ prev_block[i];
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = fs::read_to_string("config.json")
@@ -22,6 +100,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conf:Config =  serde_json::from_str(&config).unwrap();
     println!("Host={}, Room={}, Passkey={}",conf.Host.clone(), conf.Room.clone(), conf.Passkey.clone());
 
+    let passcode = conf.Passkey.clone();
+    let mut key = [0u8; 32];
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut key);
+    for i in 0..passcode.len().min(key.len()) {
+        key[i] = passcode.as_bytes()[i];
+    }
+    let plaintext = conf.Room.as_bytes();
+    let ciphertext = encrypt_aes_256_cbc(plaintext, &key);
+    println!("Plaintext: {:?}", plaintext);
+    println!("Ciphertext: {:?}", ciphertext);
+    let decryptedtext = decrypt_aes_256_cbc(ciphertext.as_slice(), &key).unwrap();
+    println!("De-Ciphertext: {:?}", String::from_utf8(decryptedtext).unwrap());
     let mut client = SharedClipboardClient::connect("http://[::1]:8080").await?;
     let room = String::from("Dojo");
     let request = tonic::Request::new(RoomId {
