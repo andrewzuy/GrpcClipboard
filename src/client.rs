@@ -8,6 +8,11 @@ use std::io::{self, Write};
 use aes::Aes256;
 use aes::cipher::{BlockCipher, BlockDecrypt,generic_array::GenericArray};
 use rand::{rngs::OsRng, RngCore};
+use clipboard::ClipboardProvider;
+use clipboard::ClipboardContext;
+use tonic::transport::Channel;
+use sha256::{digest, try_digest};
+
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
@@ -74,7 +79,6 @@ fn decrypt_aes_256_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
             plaintext[i * 16..(i + 1) * 16].copy_from_slice(&decrypted_block);
         }
     }
-    
     // Remove PKCS#7 padding from the plaintext
     let padding = plaintext[plaintext.len() - 1] as usize;
     let unpadded_length = plaintext.len() - padding;
@@ -93,6 +97,12 @@ fn block_cipher_decrypt(output: &mut [u8], cipher: &Aes256, prev_block: &[u8], i
     }
 }
 
+async fn join_room(client:&mut SharedClipboardClient<Channel>, room_id:&RoomId)-> Result<ClipboardId,Box<dyn std::error::Error>>{
+    let request = tonic::Request::new(room_id.clone());
+    let response = client.join_shared_room(request).await?.into_inner().clone();
+    Ok(response)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = fs::read_to_string("config.json")
@@ -101,28 +111,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Host={}, Room={}, Passkey={}",conf.Host.clone(), conf.Room.clone(), conf.Passkey.clone());
 
     let passcode = conf.Passkey.clone();
+    let dig =  digest(passcode).clone();
+    let digest_key = dig.as_bytes();
     let mut key = [0u8; 32];
-    let mut rng = OsRng;
-    rng.fill_bytes(&mut key);
-    for i in 0..passcode.len().min(key.len()) {
-        key[i] = passcode.as_bytes()[i];
-    }
+    key.copy_from_slice(&digest_key[0..32]);
     let plaintext = conf.Room.as_bytes();
     let ciphertext = encrypt_aes_256_cbc(plaintext, &key);
     println!("Plaintext: {:?}", plaintext);
     println!("Ciphertext: {:?}", ciphertext);
     let decryptedtext = decrypt_aes_256_cbc(ciphertext.as_slice(), &key).unwrap();
     println!("De-Ciphertext: {:?}", String::from_utf8(decryptedtext).unwrap());
-    let mut client = SharedClipboardClient::connect("http://[::1]:8080").await?;
-    let room = String::from("Dojo");
-    let request = tonic::Request::new(RoomId {
-        room: room,
-    });
 
-    let response = client.join_shared_room(request).await?.into_inner().clone();
+    let mut client = SharedClipboardClient::connect("http://[::1]:8080").await?;
+    let room_id = RoomId{room:"dojo".to_string()};
+    let response = join_room(&mut client, &room_id).await?.clone();
     let response_clone = response.clone();
     println!("Room={}, ClipboardId={:x}", response.room_id.unwrap().room, md5::compute(response.clipboard_id) ) ;
-
     let request = tonic::Request::new(response_clone);
     let response = client.get_clipboard(request);
     let cloned_response = response.await?.into_inner().clone();

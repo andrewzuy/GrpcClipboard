@@ -19,6 +19,7 @@ path = "src/client.rs"
 [dependencies]
 aes = "0.8.2"
 clearscreen = "2.0.1"
+clipboard = "0.5.0"
 config-file = "0.2.3"
 json = "0.12.4"
 md5 = "0.7.0"
@@ -28,6 +29,7 @@ rand = "0.8.5"
 rust-crypto = "0.2.36"
 serde = { version = "1.0.96", features = ["derive"] }
 serde_json = "1.0.96"
+sha256 = "1.1.2"
 tokio = {version = "1.27.0", features = ["rt-multi-thread"]}
 tonic = "0.9.1"
 
