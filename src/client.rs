@@ -13,8 +13,10 @@ use clipboard::ClipboardContext;
 use tonic::transport::Channel;
 use sha256::{digest, try_digest};
 use std::{thread, time};
-use tokio::task;
-use std::borrow::Borrow;
+use base64::{Engine as _, engine::{self, general_purpose}, alphabet};
+const CUSTOM_ENGINE: engine::GeneralPurpose =
+    engine::GeneralPurpose::new(&alphabet::URL_SAFE, general_purpose::NO_PAD);
+
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
@@ -26,19 +28,28 @@ struct Config{
     Passkey:String
 }
 
-fn get_system_clipboard(){
+fn get_system_clipboard()->String{
     let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-    let clipboard = ctx.get_contents().unwrap();
-    println!("{}",clipboard);
+    let clipboard =match ctx.get_contents(){
+        Ok(clipboard) => clipboard,
+        Err(e) => "".to_string()
+    };
+    clipboard
 }
 
-fn encrypt_aes_256_cbc(plaintext: &[u8], key: &[u8; 32]) -> Vec<u8> {
+fn set_system_clipboard(value:String){
+    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    ctx.set_contents(value).unwrap();
+}
+
+fn encrypt_aes_256_cbc(plaintext: String, key: &[u8; 32]) -> String {
     let mut iv = [0u8; 16];
     let mut rng = OsRng;
     rng.fill_bytes(&mut iv);
     let cipher = Aes256::new(GenericArray::from_slice(key));
     let mut ciphertext = iv.to_vec();
     let mut prev_block = iv;
+    let plaintext = plaintext.as_bytes();
     for block in plaintext.chunks(16) {
         let mut plaintext_block = [0u8; 16];
         plaintext_block[..block.len()].copy_from_slice(block);
@@ -50,10 +61,14 @@ fn encrypt_aes_256_cbc(plaintext: &[u8], key: &[u8; 32]) -> Vec<u8> {
         prev_block = ciphertext_block;
         ciphertext.extend_from_slice(&ciphertext_block);
     }
-    ciphertext
+    CUSTOM_ENGINE.encode(ciphertext) 
 }
 
-fn decrypt_aes_256_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+fn decrypt_aes_256_cbc(ciphertext: String, key: &[u8; 32]) -> Option<String> {
+    let ciphertext = match CUSTOM_ENGINE.decode(ciphertext){
+        Ok(cipher) => cipher,
+        Err(e) => Vec::new()
+    };
     if ciphertext.len() < 16 {
         return None;
     }
@@ -80,8 +95,8 @@ fn decrypt_aes_256_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
     let padding = plaintext[plaintext.len() - 1] as usize;
     let unpadded_length = plaintext.len() - padding;
     plaintext.truncate(unpadded_length);
-    
-    Some(plaintext)
+    let result = unsafe{String::from_utf8_unchecked(plaintext)};
+    Some(result)
 }
 
 fn block_cipher_decrypt(output: &mut [u8], cipher: &Aes256, prev_block: &[u8], input: &[u8]) {
@@ -94,14 +109,47 @@ fn block_cipher_decrypt(output: &mut [u8], cipher: &Aes256, prev_block: &[u8], i
     }
 }
 
-async fn watch_clipboard(host:String, room:String){
+async fn watch_clipboard(host:String, room:String, passkey:String){
     let one_second = time::Duration::from_secs(1);
+    let digest_key = digest(passkey).clone();
+    let digest_longkey = digest_key.as_bytes();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&digest_longkey[0..32]);
     let mut client = SharedClipboardClient::connect(host).await.unwrap();
     let room_id = RoomId{room:room.clone()};
+    let mut previous_clipboardId = join_room(&mut client,&room_id).await.unwrap();
     loop{
-        let clipboardId = join_room(&mut client,&room_id);
+        let clipboardId= match join_room(&mut client, &room_id).await{
+            Ok(clipboardId) => clipboardId,
+            Err(clipoardId) => previous_clipboardId.clone()
+
+        };
+        println!("Clipboard ID = {}", clipboardId.clipboard_id);
+        let sys_clip_encoded = encrypt_aes_256_cbc(get_system_clipboard(), &key);
+        let sys_clip_pure = get_system_clipboard();
+        if clipboardId.clipboard_id != previous_clipboardId.clipboard_id{
+            let mut retr_clip = match get_clipboard(&mut client, &clipboardId).await{
+                Ok(clip) => clip,
+                Err(e) => Clipboard { 
+                    clipboard_id: Some(clipboardId.clone()),
+                    data: sys_clip_encoded.clone()
+                }
+            };
+            set_system_clipboard(decrypt_aes_256_cbc(retr_clip.data, &key).unwrap());
+        } else  if format!("{:X}",md5::compute(sys_clip_pure.clone())) != clipboardId.clipboard_id {
+            let mut clipboard = Clipboard { 
+                clipboard_id: Some(ClipboardId { room_id: Some(room_id.clone()), clipboard_id: format!("{:X}",md5::compute(sys_clip_pure)) }),
+                data:  sys_clip_encoded.clone() 
+            };
+            previous_clipboardId = match set_clipboard(&mut client, &clipboard).await{
+                Ok(clipboard) => clipboard,
+                Err(e) => previous_clipboardId
+            }
+        }
+
+        println!("Clipboard text: \n {}", get_system_clipboard());
         thread::sleep(one_second);
-        get_system_clipboard();
+
     }
 }
 
@@ -128,51 +176,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = fs::read_to_string("config.json")
         .expect("Should have been able to read the file");
     let conf:Config =  serde_json::from_str(&config).unwrap();
-    //println!("Host={}, Room={}, Passkey={}",conf.Host.clone(), conf.Room.clone(), conf.Passkey.clone());
-
-    //let passcode = conf.Passkey.clone();
-    //let dig =  digest(passcode).clone();
-    //let digest_key = dig.as_bytes();
-    //let mut key = [0u8; 32];
-    //key.copy_from_slice(&digest_key[0..32]);
-    //let plaintext = conf.Room.as_bytes();
-    //let ciphertext = encrypt_aes_256_cbc(plaintext, &key);
-    //println!("Plaintext: {:?}", plaintext);
-    //println!("Ciphertext: {:?}", ciphertext.clone());
-    //let decryptedtext = decrypt_aes_256_cbc(ciphertext.as_slice(), &key).unwrap();
-    //println!("De-Ciphertext: {:?}", String::from_utf8(decryptedtext).unwrap());
-
-    //let mut client = SharedClipboardClient::connect("http://[::1]:8080").await?;
-    //let room_id = RoomId{room:conf.Room};
-    //let mut clone_client = client.clone();
-    //let response = join_room(&mut client, &room_id).await?.clone();
-    //let response_clone = response.clone();
-    //println!("Room={}, ClipboardId={:x}", response.room_id.unwrap().room, md5::compute(response.clipboard_id) ) ;
-    //let response = get_clipboard(&mut client, &response_clone).await?.clone();
-    //let room = response.clone().clipboard_id.unwrap().room_id.unwrap().room.clone();
-    //let id = response.clone().clipboard_id.unwrap().clipboard_id.clone();
-    //let data = response.clone().data.clone();
-    //println!("----------------GOT RESPONSE--------------");
-    //println!("Room={}, ClipboardId={}, ClipboardData={}", room, id, data);
-
-    //let paste = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_secs();
-    //let data = paste.to_string();
-    //let hash = md5::compute(&data);
-
-    //let new_clipboard = Clipboard{
-    //    clipboard_id : Some(ClipboardId{
-    //        room_id : Some(RoomId { room: room.clone()}),
-    //        clipboard_id : format!("{:X}", hash )
-    //    }),
-    //    data : data.clone()
-    //};
-    //let response = set_clipboard(&mut client, &new_clipboard).await?.clone();
-    //println!("----------------SET RESPONSE--------------");
-    //println!("Room={}, ClipboardId={}, ClipboardData={}", room, format!("{:X}", hash ), data);
-    //println!("Returned from server ID={}", response.clipboard_id);
-    let rom = conf.Room.clone();
+    let room = conf.Room.clone();
     let host = conf.Host.clone();
-    let task = thread::spawn( ||{watch_clipboard(host,rom)});
-    task.join().unwrap();
+    let passkey = conf.Passkey.clone();
+    let task = thread::spawn(move ||{watch_clipboard(host,room,passkey)});
+    let handl = task.join();
+    handl.unwrap().await;
     Ok(())
 }

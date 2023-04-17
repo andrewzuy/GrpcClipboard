@@ -16,35 +16,32 @@ pub mod clipboard_package{
 
  #[derive(Debug, Default, Clone)]
  pub struct SecureClipboard {
-     RoomToClipboardIdMap : Arc<Mutex<RefCell<HashMap<String,String>>>>
+     RoomToClipboardIdMap : Arc<Mutex<RefCell<HashMap<String,Clipboard>>>>
  }
 
  #[tonic::async_trait]
  impl SharedClipboard for SecureClipboard{
      async fn join_shared_room(&self, request: Request<RoomId>) -> Result<Response<ClipboardId>, Status> {
          let roomId = request.into_inner();
-         let mut clipboard_data = String::new();
+         let mut clipboard_data = Clipboard{ clipboard_id: Some(ClipboardId{room_id:Some(RoomId{room:"".to_string()}), clipboard_id :"".to_string()}),data:"".to_string()};
          if self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().contains_key(&roomId.room) {
              let map = self.RoomToClipboardIdMap.lock().unwrap().clone().into_inner();
              clipboard_data = map.get(&roomId.room).unwrap().clone();
          } else {
              let clonedMap = self.RoomToClipboardIdMap.lock().unwrap();
              let mut clonedMap = clonedMap.borrow_mut();
-             clonedMap.insert(roomId.clone().room, "".to_string());
+             clonedMap.insert(roomId.clone().room, clipboard_data.clone());
          }
          if debug{
             clearscreen::clear();
             for (room_id, clipboard_id) in self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().iter() {
-                println!("------------------------------------------------");
-                println!("Room {} :: ClipboardId {:X}", room_id, md5::compute(clipboard_id)); 
+                println!("------------------------------------------------------------------");
+                println!("Room {} :: ClipboardId {}", room_id, clipboard_id.clone().clipboard_id.unwrap().clipboard_id); 
+                println!("Value:: {}", clipboard_id.data)
             }
-                println!("------------------------------------------------");
+                println!("------------------------------------------------------------------");
         }
-         let response = ClipboardId {
-
-             room_id : Option::Some(roomId),
-             clipboard_id: format!("{:X}", md5::compute(clipboard_data)) 
-         };
+         let response = clipboard_data.clone().clipboard_id.unwrap();
 
          Ok(Response::new(response))
      }
@@ -53,36 +50,19 @@ pub mod clipboard_package{
      async fn get_clipboard(&self, request: Request<ClipboardId>) -> Result<Response<Clipboard>, Status> {
         let clipboardId = request.into_inner();
         let room = clipboardId.room_id.unwrap().room;
-        let mut clipboardString = String::new();
+        let mut clipboard = Clipboard{ clipboard_id: Some(ClipboardId{room_id:Some(RoomId{room:"".to_string()}), clipboard_id :"".to_string()}),data:"".to_string()};
         if self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().contains_key(&room) {
             let map = self.RoomToClipboardIdMap.lock().unwrap().clone().into_inner();
-            clipboardString = map.get(&room).unwrap().clone();
+            clipboard = map.get(&room).unwrap().clone();
         }
-        let clone = clipboardString.clone();
-        let hash = md5::compute(clipboardString);
-        let response = Clipboard{
-            clipboard_id : Some(ClipboardId{
-                room_id : Some(RoomId { room: room.clone()}),
-                clipboard_id : format!("{:X}", hash )
-            }),
-            data : clone
-        };
-        
-        Ok(Response::new(response))
+        Ok(Response::new(clipboard))
      }
 
      async fn set_clipboard(&self, request: Request<Clipboard>) -> Result<Response<ClipboardId>, Status> {
         let clipboard = request.into_inner();
-        let room = clipboard.clipboard_id.unwrap().room_id.unwrap().room.clone();
-        let room_clone = room.clone();
-        let clip_data = clipboard.data.clone();
-        let hash = md5::compute(clipboard.data);
-        self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().insert(room, clip_data);
-        let response = ClipboardId{
-            room_id : Some(RoomId { room: room_clone}),
-            clipboard_id : format!("{:X}", hash )
-        };
-         Ok(Response::new(response))
+        let room = clipboard.clone().clipboard_id.unwrap().room_id.unwrap().room.clone();
+        self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().insert(room, clipboard.clone());
+         Ok(Response::new(clipboard.clone().clipboard_id.unwrap()))
      }
  }
 
