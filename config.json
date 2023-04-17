@@ -1,5 +1,5 @@
 {
-    "Host":"http://[::1]:8080",
+    "Host":"http://127.0.0.1:8080",
     "Room":"DojoRoom",
     "Passkey":"Journey"
 }

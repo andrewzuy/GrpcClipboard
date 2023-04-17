@@ -17,6 +17,7 @@ use base64::{Engine as _, engine::{self, general_purpose}, alphabet};
 const CUSTOM_ENGINE: engine::GeneralPurpose =
     engine::GeneralPurpose::new(&alphabet::URL_SAFE, general_purpose::NO_PAD);
 
+
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
@@ -28,8 +29,7 @@ struct Config{
     Passkey:String
 }
 
-fn get_system_clipboard()->String{
-    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+fn get_system_clipboard(ctx: &mut ClipboardContext)->String{
     let clipboard =match ctx.get_contents(){
         Ok(clipboard) => clipboard,
         Err(e) => "".to_string()
@@ -37,8 +37,7 @@ fn get_system_clipboard()->String{
     clipboard
 }
 
-fn set_system_clipboard(value:String){
-    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+fn set_system_clipboard(ctx: &mut ClipboardContext,value:String){
     ctx.set_contents(value).unwrap();
 }
 
@@ -110,6 +109,7 @@ fn block_cipher_decrypt(output: &mut [u8], cipher: &Aes256, prev_block: &[u8], i
 }
 
 async fn watch_clipboard(host:String, room:String, passkey:String){
+    let mut ctx = ClipboardProvider::new().unwrap();
     let one_second = time::Duration::from_secs(1);
     let digest_key = digest(passkey).clone();
     let digest_longkey = digest_key.as_bytes();
@@ -125,8 +125,8 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
 
         };
         println!("Clipboard ID = {}", clipboardId.clipboard_id);
-        let sys_clip_encoded = encrypt_aes_256_cbc(get_system_clipboard(), &key);
-        let sys_clip_pure = get_system_clipboard();
+        let sys_clip_encoded = encrypt_aes_256_cbc(get_system_clipboard(&mut ctx), &key);
+        let sys_clip_pure = get_system_clipboard(&mut ctx);
         if clipboardId.clipboard_id != previous_clipboardId.clipboard_id{
             let mut retr_clip = match get_clipboard(&mut client, &clipboardId).await{
                 Ok(clip) => clip,
@@ -135,7 +135,7 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
                     data: sys_clip_encoded.clone()
                 }
             };
-            set_system_clipboard(decrypt_aes_256_cbc(retr_clip.data, &key).unwrap());
+            set_system_clipboard(&mut ctx,decrypt_aes_256_cbc(retr_clip.data, &key).unwrap());
         } else  if format!("{:X}",md5::compute(sys_clip_pure.clone())) != clipboardId.clipboard_id {
             let mut clipboard = Clipboard { 
                 clipboard_id: Some(ClipboardId { room_id: Some(room_id.clone()), clipboard_id: format!("{:X}",md5::compute(sys_clip_pure)) }),
@@ -147,7 +147,7 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
             }
         }
 
-        println!("Clipboard text: \n {}", get_system_clipboard());
+        println!("Clipboard text: \n {}", get_system_clipboard(&mut ctx));
         thread::sleep(one_second);
 
     }
