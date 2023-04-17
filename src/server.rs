@@ -68,7 +68,7 @@ pub mod clipboard_package{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "[::1]:8080".parse().unwrap();
+    let address = "0.0.0.0:8080".parse().unwrap();
     let clipboard_service = SecureClipboard::default();
 
     Server::builder().add_service(SharedClipboardServer::new(clipboard_service))
