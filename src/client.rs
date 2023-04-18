@@ -123,7 +123,7 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
             Ok(clip) => clipboardId = clip,
             Err(e)=> println!("{}",e)
         };
-        println!("Clipboard ID = {}", clipboardId.clipboard_id);
+        //println!("Clipboard ID = {}", clipboardId.clipboard_id);
         let sys_clip_encoded = encrypt_aes_256_cbc(get_system_clipboard(&mut ctx), &key);
         let sys_clip_pure = get_system_clipboard(&mut ctx);
         if clipboardId.clipboard_id != previous_clipboardId.clipboard_id{
@@ -150,7 +150,7 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
                 Err(e) => previous_clipboardId
             }
         }
-        println!("Clipboard text: \n {}", get_system_clipboard(&mut ctx));
+        //println!("Clipboard text: \n {}", get_system_clipboard(&mut ctx));
         thread::sleep(one_second);
 
     }

@@ -7,8 +7,9 @@ use crate::clipboard_package::shared_clipboard_server::SharedClipboard;
 use crate::clipboard_package::{Clipboard, RoomId};
 use crate::clipboard_package::ClipboardId;
 use std::sync::{Arc, Mutex};
+use std::env;
 
-static debug: bool = true;
+static mut debug: bool = false;
 
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
@@ -32,15 +33,18 @@ pub mod clipboard_package{
              let mut clonedMap = clonedMap.borrow_mut();
              clonedMap.insert(roomId.clone().room, clipboard_data.clone());
          }
-         if debug{
-            clearscreen::clear();
-            for (room_id, clipboard_id) in self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().iter() {
-                println!("------------------------------------------------------------------");
-                println!("Room {} :: ClipboardId {}", room_id, clipboard_id.clone().clipboard_id.unwrap().clipboard_id); 
-                println!("Value:: {}", clipboard_id.data)
-            }
-                println!("------------------------------------------------------------------");
-        }
+         unsafe{
+             if debug{
+                 clearscreen::clear();
+                 for (room_id, clipboard_id) in self.RoomToClipboardIdMap.lock().unwrap().borrow_mut().iter() {
+                     println!("------------------------------------------------------------------");
+                     println!("Room {} :: ClipboardId {}", room_id, clipboard_id.clone().clipboard_id.unwrap().clipboard_id);
+                     println!("Value:: {}", clipboard_id.data)
+                 }
+                 println!("------------------------------------------------------------------");
+             }
+         }
+
          let response = clipboard_data.clone().clipboard_id.unwrap();
 
          Ok(Response::new(response))
@@ -68,6 +72,15 @@ pub mod clipboard_package{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    unsafe{
+        let args: Vec<String> = env::args().collect();
+        if args.len()>1{
+            if args[1].to_string().contains("debug"){
+                debug = true;
+            };
+        }
+    }
+
     let address = "0.0.0.0:8080".parse().unwrap();
     let clipboard_service = SecureClipboard::default();
 
