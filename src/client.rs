@@ -17,7 +17,6 @@ use base64::{Engine as _, engine::{self, general_purpose}, alphabet};
 const CUSTOM_ENGINE: engine::GeneralPurpose =
     engine::GeneralPurpose::new(&alphabet::URL_SAFE, general_purpose::NO_PAD);
 
-
 pub mod clipboard_package{
     tonic::include_proto!("clipboard_package");
 }
@@ -91,9 +90,6 @@ fn decrypt_aes_256_cbc(ciphertext: String, key: &[u8; 32]) -> Option<String> {
             plaintext[i * 16..(i + 1) * 16].copy_from_slice(&decrypted_block);
         }
     }
-    let padding = plaintext[plaintext.len() - 1] as usize;
-    let unpadded_length = plaintext.len() - padding;
-    plaintext.truncate(unpadded_length);
     let result = unsafe{String::from_utf8_unchecked(plaintext)};
     Some(result)
 }
@@ -115,27 +111,35 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
     let digest_longkey = digest_key.as_bytes();
     let mut key = [0u8; 32];
     key.copy_from_slice(&digest_longkey[0..32]);
-    let mut client = SharedClipboardClient::connect(host).await.unwrap();
+    let mut client = match SharedClipboardClient::connect(host).await{
+        Ok(client) => client,
+        Err(e) => panic!("Unable to establish connection: {}",e)
+    };
     let room_id = RoomId{room:room.clone()};
-    let mut previous_clipboardId = join_room(&mut client,&room_id).await.unwrap();
+    let mut previous_clipboardId = ClipboardId { room_id: Some(room_id.clone()), clipboard_id: format!("{:X}",md5::compute("".to_string())) };
     loop{
-        let clipboardId= match join_room(&mut client, &room_id).await{
-            Ok(clipboardId) => clipboardId,
-            Err(clipoardId) => previous_clipboardId.clone()
-
+        let mut clipboardId = previous_clipboardId.clone();
+       match join_room(&mut client, &room_id).await{
+            Ok(clip) => clipboardId = clip,
+            Err(e)=> println!("{}",e)
         };
         println!("Clipboard ID = {}", clipboardId.clipboard_id);
         let sys_clip_encoded = encrypt_aes_256_cbc(get_system_clipboard(&mut ctx), &key);
         let sys_clip_pure = get_system_clipboard(&mut ctx);
         if clipboardId.clipboard_id != previous_clipboardId.clipboard_id{
-            let mut retr_clip = match get_clipboard(&mut client, &clipboardId).await{
-                Ok(clip) => clip,
-                Err(e) => Clipboard { 
-                    clipboard_id: Some(clipboardId.clone()),
-                    data: sys_clip_encoded.clone()
-                }
+            let mut retr_clip = Clipboard { 
+                clipboard_id: Some(clipboardId.clone()),
+                data: sys_clip_encoded.clone()
             };
-            set_system_clipboard(&mut ctx,decrypt_aes_256_cbc(retr_clip.data, &key).unwrap());
+            match get_clipboard(&mut client, &clipboardId).await{
+                Ok(clip) => retr_clip = clip,
+                Err(e) => println!("{}",e)
+            };
+            match decrypt_aes_256_cbc(retr_clip.data, &key){
+                Some(deciphered_clip) => set_system_clipboard(&mut ctx,deciphered_clip),
+                None=> println!("Unable to set clipboard because of:")
+            }
+            previous_clipboardId.clipboard_id = clipboardId.clipboard_id;
         } else  if format!("{:X}",md5::compute(sys_clip_pure.clone())) != clipboardId.clipboard_id {
             let mut clipboard = Clipboard { 
                 clipboard_id: Some(ClipboardId { room_id: Some(room_id.clone()), clipboard_id: format!("{:X}",md5::compute(sys_clip_pure)) }),
@@ -146,7 +150,6 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
                 Err(e) => previous_clipboardId
             }
         }
-
         println!("Clipboard text: \n {}", get_system_clipboard(&mut ctx));
         thread::sleep(one_second);
 
