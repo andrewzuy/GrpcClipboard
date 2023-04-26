@@ -115,6 +115,7 @@ async fn watch_clipboard(host:String, room:String, passkey:String){
         Ok(client) => client,
         Err(e) => panic!("Unable to establish connection: {}",e)
     };
+    client = client.max_decoding_message_size(100*1024*1024);
     let room_id = RoomId{room:room.clone()};
     let mut previous_clipboardId = ClipboardId { room_id: Some(room_id.clone()), clipboard_id: format!("{:X}",md5::compute("".to_string())) };
     loop{
